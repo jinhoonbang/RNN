@@ -62,7 +62,7 @@ class RNN(object):
         # target (where first dimension is time)
         self.t = T.ivector()
         # initial hidden state of the RNN
-        self.H = T.matrix()
+        self.H = T.imatrix()
         # learning rate
         self.lr = T.scalar()
 
@@ -245,7 +245,6 @@ class Engine(object):
                 binary=numpy.delete(binary,[0,1])
                 binary=binary.reshape((numRow,numCol))
                 binary = binary[:N]
-                print(binary)
 
                 label[:,index] = binary[:,0]
                 feature[:, col_index:col_index+numCol-1] = binary[:, 1:]
@@ -254,6 +253,7 @@ class Engine(object):
                 index += 1
 
             feature = feature[:,:col_index]
+            label = label + 1
             label = label[:,0]
 
             print("label", label.shape)
@@ -270,8 +270,8 @@ class Engine(object):
             return feature, label
 
         def trainTestSplit(feature, label):
-            n_train = 0.6 * N
-            n_valid = 0.2 * N
+            n_train = int(0.6 * N)
+            n_valid = int(0.2 * N)
 
             x_train = feature[:n_train]
             y_train = label[:n_train]
