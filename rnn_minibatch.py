@@ -220,8 +220,8 @@ class Engine(object):
         n_out = 129 # number of output units
         n_symbol = 43
         minibatch = 20 # sequence length
-        print('network: n_in:{},n_hidden:{},n_out:{},output:softmax'.format(n_in, n_hidden, n_out))
-        print('data: samples:{},length:{},batch_size:{}'.format(N,minibatch,N))
+        print('network: n_in:', n_in, 'n_hidden:', n_hidden, 'n_out:', n_out, 'output:softmax')
+        print('data: samples:', N, 'batch_size:', minibatch)
 
         #load Data
         def preprocessData(path):
