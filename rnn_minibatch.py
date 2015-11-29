@@ -176,8 +176,8 @@ class RNN(object):
         train_fn = theano.function([self.u, self.t],
                              outputs=self.cost,
                              updates=updates,
-                             givens={self.H:T.cast(self.h, 'float32'),
-                                     self.lr:T.cast(learning_rate, 'float32')},
+                             givens={self.H:T.cast(self.h, 'float64'),
+                                     self.lr:T.cast(learning_rate, 'float64')},
                              mode=mode,
                              profile=profile)
 
