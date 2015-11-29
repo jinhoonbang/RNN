@@ -1,33 +1,34 @@
 __author__ = 'JinHoon'
 
 """
-    This file contains a RNN benchmark for a standard RNN with tap -1 and minibatches.
+    This file contains a RNN benchmark for a standard RNN with tap -1 without minibatches.
     It uses a softmax output layer. It can be used to compare THEANO with another
     RNN code snippet.
 
-    This version must have equal sequence lengths (padded).
-    However it's faster than the normal version
+    This version can have different sequence lengths. You can access them via a special
+    index table.
 
     data format:
 
-        inumpyut  ...  tensor3():[N][seq_length][frame]
+        input  ...  matrix:[N][frame]
         output ...  vector:[target1|...|targetN]
 
-        access a inumpyut sequence N via inumpyut[N]. To access a special
-        frame N in sequence N simply type inumpyut[N][N][:]
+        access a input sequence N via the indexTable idx
+           input[idx['input'][N]:idx['input'][N+1]]
 
         access a target (output) N via the indexTable idx
             target[idx['target'][N]:idx['target'][N+1]]
 
     NOTE:
         - Please take care that you only compare equal networks with equal datasets.
-        - taps greater [-1] are not supported yet (although there are the for loops in step),
-          due to tensor4() inconsistency
-    BUGS:
-        - there are some bugs with shared datasets, which have to be fixed (see line:206)
+        - this version works with taps [-N,...,-1]
+        - if you want to use tap [-1] please init with [-1,0], due to a shape mismatch
+        - if you want to use tap [-2,-1] please init with [-2,-1]
 """
 
-import time, sys
+import sys
+import os
+import time
 import numpy
 import theano
 import theano.tensor as T
@@ -37,7 +38,7 @@ import glob
 class RNN(object):
 
     #---------------------------------------------------------------------------------
-    def __init__(self, rng, output_taps, n_in, n_hidden, n_out, samples, minibatch, mode, profile, dtype=theano.config.floatX):
+    def __init__(self, rng, output_taps, n_in, n_hidden, n_out, mode, profile, dtype=theano.config.floatX):
         """
             :type rng: numpy.random.RandomState
             :param rng: a random number generator used to initialize weights
@@ -46,7 +47,7 @@ class RNN(object):
             :param order: order of the RNN (used for higher order RNNs)
 
             :type n_in: int32
-            :param n_in: number of inumpyut neurons
+            :param n_in: number of input neurons
 
             :type n_hidden: int32
             :param n_hidden: number of hidden units
@@ -55,76 +56,94 @@ class RNN(object):
             :param dtype: theano 32/64bit mode
         """
 
+        #--------------------------------------------------------------------
+        # PROBLEM section (needs review)
+        #--------------------------------------------------------------------
+        """
+         here the the recurrent delay elements (taps) will be created
+         You can change the line below to add special delays like [-4,-1]
+
+         Problem: single delays like tap = [-1] lead to a T.matrix() generation
+                  in step() line:117. A theano shape error will be generated.
+                  Hence we have to create at least a tuple [-1,0] for order.1 RNNs.
+                  Tap[0] will not be used in step (skipped)
+
+         QuickFIX: tap = [-1,0] -> tap[0] won't be used
+         Description: we have to create at least a tuple [-1,0] used in
+                      outputs_info line:91
+                      otherwise a T.matrix will be generated in step(),
+                      leading to an theano shape error.
+         Discuss: @theano-dev-group
+        """
+
         # length of output taps
         self.len_output_taps = len(output_taps)
-        # inumpyut (where first dimension is time)
-        self.u = T.tensor3()
-        # target (where first dimension is time)
-        self.t = T.ivector()
-        # initial hidden state of the RNN
-        self.H = T.dmatrix()
+        # input over the time (1st dim is the time)
+        self.x  = T.matrix('x')
+        # target over the time (1st dim is the time)
+        self.y  = T.ivector('y')
+        # recurrent activations over the time (1st dim is the time)
+        self.H = T.matrix()
         # learning rate
-        self.lr = T.scalar()
+        self.lr = T.fscalar()
 
-        # recurrent weights as real values
-        W = [theano.shared(numpy.random.uniform(size=(n_hidden, n_hidden), low= -.01, high=.01).astype(dtype), \
-                                                name='W_r' + str(output_taps[u])) for u in range(self.len_output_taps)]
+        # input to hidden layer weights
+        W_in = theano.shared(numpy.asarray(rng.uniform(
+                low  = - numpy.sqrt(6./(n_in+n_hidden)),
+                high = numpy.sqrt(6./(n_in+n_hidden)),
+                size = (n_in, n_hidden)),
+                dtype = dtype), name='W_in')
+        b_in = theano.shared(numpy.zeros((n_hidden,), dtype=dtype), name='b_in')
 
         # recurrent bias
         b_h = theano.shared(numpy.zeros((n_hidden,)).astype(dtype), name='b_h')
         # recurrent activations
-        self.h = theano.shared(numpy.zeros((minibatch, n_hidden)).astype(dtype), name='h')
-
-        # inumpyut to hidden layer weights
-        W_in = theano.shared(numpy.random.uniform(size=(n_in, n_hidden), low= -.01, high=.01).astype(dtype), name='W_in')
-        # inumpyut bias
-        b_in = theano.shared(numpy.zeros((n_hidden,)).astype(dtype), name='b_in')
+        self.h = theano.shared(numpy.zeros((n_hidden, n_hidden), dtype=dtype), name='h')
+        # recurrent weights as real values
+        W = [theano.shared(numpy.asarray(rng.uniform(low  = - numpy.sqrt(6./(n_hidden+n_hidden)),\
+                                    high = numpy.sqrt(6./(n_hidden+n_hidden)),\
+                                    size = (n_hidden, n_hidden)), dtype = dtype),\
+                                    name='W_r'+str(u)) for u in range(self.len_output_taps)]
 
         # hidden to output layer weights
-        W_out = theano.shared(numpy.random.uniform(size=(n_hidden, n_out), low= -.01, high=.01).astype(dtype), name='W_out')
-        # output bias
-        b_out = theano.shared(numpy.zeros((n_out,)).astype(dtype), name='b_out')
+        W_out = theano.shared(numpy.asarray(rng.uniform(
+                low  = - numpy.sqrt(6./(n_hidden+n_out)),
+                high = numpy.sqrt(6./(n_hidden+n_out)),
+                size = (n_hidden, n_out)),
+                dtype = dtype), name = 'W_out')
+        b_out = theano.shared(numpy.zeros((n_out,), dtype=dtype), name='b_out')
 
         # stack the network parameters
         self.params = []
         self.params.extend(W)
         self.params.extend([b_h])
         self.params.extend([W_in, b_in])
-        self.params.extend([W_out, b_out])
 
-        # the hidden state `h` for the entire sequence, and the output for the
-        # entry sequence `y` (first dimension is always time)
-        h, updates = theano.scan(self.step,
-                        sequences=self.u,
-                        outputs_info=dict(initial=self.H, taps=[-1]),
-                        non_sequences=self.params,
-                        mode=mode,
-                        profile=profile)
+        # this is the recursive BBTP loop
+        # `self.H` are the recurrent activations, 'y_act_list' is the output for the
+        # entire sequence over the time
+        h, updates = theano.scan(fn = self.step, \
+                             sequences = dict(input = self.x, taps = [0]), \
+                             outputs_info = dict(initial = self.H, taps = output_taps), \
+                             non_sequences = self.params,
+                             mode=mode,
+                             profile=profile)
 
-        # compute the output of the network
-        # theano has no softmax tensor3() support at the moment
-        y, updates = theano.scan(self.softmax_tensor,
-                    sequences=h,
-                    non_sequences=[W_out, b_out],
-                    mode=mode,
-                    profile=profile)
+        # softmax output signal
+        self.y_act = T.nnet.softmax(T.dot(h, W_out) + b_out)
 
         # error between output and target
-        #self.cost = ((y - self.t) ** 2).sum()
-        y_tmp = y.reshape((samples*minibatch,n_out))
-        self.cost = -T.mean(T.log(y_tmp)[T.arange(self.t.shape[0]), self.t])
+        self.cost = -T.mean(T.log(self.y_act)[T.arange(self.y.shape[0]), self.y])
 
-    #---------------------------------------------------------------------------------
-    def softmax_tensor(self, h, W, b):
-        return T.nnet.softmax(T.dot(h, W) + b)
+        # add the output network params
+        self.params.extend([W_out, b_out])
 
-    #---------------------------------------------------------------------------------
     def step(self, u_t, *args):
             """
                 step function to calculate BPTT
 
                 type u_t: T.matrix()
-                param u_t: inumpyut sequence of the network
+                param u_t: input sequence of the network
 
                 type * args: python parameter list
                 param * args: this is needed to implement a more general model of the step function
@@ -139,7 +158,7 @@ class RNN(object):
             # get the recurrent weights
             r_weights = [args[u] for u in range(self.len_output_taps, (self.len_output_taps) * 2)]
 
-            # get the inumpyut/output weights
+            # get the input/output weights
             b_h = args[self.len_output_taps * 2]
             W_in = args[self.len_output_taps * 2 + 1]
             b_in = args[self.len_output_taps * 2 + 2]
@@ -155,9 +174,33 @@ class RNN(object):
             return h_t
 
     #---------------------------------------------------------------------------------
-    def build_finetune_functions(self, learning_rate, mode, profile):
+    def build_finetune_functions(self, train_set_x, train_set_y, learning_rate, mode, profile):
+        """
+            type train_set_x: T.matrix()
+            param train_set_x: training input sequences of the network
+
+            type train_set_y: T.ivector()
+            param train_set_y: training output sequences of the network
+
+            type learning_rate: float32
+            param learning_rate: learning_rate of the training algorithm
+
+            type mode: str
+            param mode: theano function compile mode
+
+        """
+
+        #-----------------------------------------
+        # THEANO variables for the data access
+        #-----------------------------------------
+        # we specify direct indizes here, since this allows to have different seq. lengths
+        i_idx_0 = T.iscalar('input_start') # index to input start
+        i_idx_1 = T.iscalar('input_stop') # index to input stop
+        t_idx_0 = T.iscalar('target_start') # index to target start
+        t_idx_1 = T.iscalar('target_stop') # index to target stop
 
         print('Compiling')
+
         #-----------------------------------------
         # THEANO train function
         #-----------------------------------------
@@ -173,13 +216,16 @@ class RNN(object):
         ]
 
         # define the train function
-        train_fn = theano.function([self.u, self.t],
-                             outputs=self.cost,
-                             updates=updates,
-                             givens={self.H:T.cast(self.h, 'float64'),
-                                     self.lr:T.cast(learning_rate, 'float64')},
-                             mode=mode,
-                             profile=profile)
+        t_inputs = [i_idx_0] + [i_idx_1] + [t_idx_0] + [t_idx_1]
+        train_fn = theano.function(inputs = t_inputs,
+                outputs = self.cost,
+                updates = updates,
+                givens={self.x:train_set_x[i_idx_0:i_idx_1],
+                        self.y:train_set_y[t_idx_0:t_idx_1],
+                        self.H:T.cast(self.h,'float32'),
+                        self.lr:T.cast(learning_rate,'float32')},
+                mode = mode,
+                profile = profile)
 
         return train_fn
 
@@ -190,7 +236,7 @@ class Engine(object):
     def __init__(self,
                 learning_rate=0.01,
                 n_epochs=20,
-                output_taps=[-1]):
+                output_taps=[-1, 0]):
 
         #-----------------------------------------
         # BENCHMARK SETUP
@@ -220,9 +266,10 @@ class Engine(object):
         n_hidden = 1000# number of hidden units
         n_out = 129 # number of output units
         n_symbol = 43
-        minibatch = 20 # sequence length
+        length = 5 #sequence length
+        batch_size = 500 # batch_size
         print('network: n_in:', n_in, 'n_hidden:', n_hidden, 'n_out:', n_out, 'output:softmax')
-        print('data: samples:', N, 'batch_size:', minibatch)
+        print('data: samples:', N, 'batch_size:', batch_size, 'sequence length', length)
 
         #load Data
         def preprocessData(path):
@@ -287,8 +334,8 @@ class Engine(object):
             valid_set = (x_valid, y_valid)
             test_set = (x_test, y_test)
 
-            #return train_set, valid_set, test_set
-            return x_train, y_train, x_valid, y_valid, x_test, y_test
+            return train_set, valid_set, test_set
+            #return x_train, y_train, x_valid, y_valid, x_test, y_test
 
         def shared_dataset(data_xy, borrow=True):
             """ Function that loads the dataset into shared variables
@@ -325,32 +372,35 @@ class Engine(object):
         # data_y = numpy.random.uniform(size=(N*minibatch)).astype('int32')
 
         feature, label = preprocessData(dataset)
-        #train_set, valid_set, test_set = trainTestSplit(feature, label)
-        # x_test, y_test = shared_dataset(test_set)
-        # x_valid, y_valid = shared_dataset(valid_set)
-        # x_train, y_train = shared_dataset(train_set)
-        x_train, y_train, x_valid, y_valid, x_test, y_test = trainTestSplit(feature, label)
+        train_set, valid_set, test_set = trainTestSplit(feature, label)
+        x_test, y_test = shared_dataset(test_set)
+        x_valid, y_valid = shared_dataset(valid_set)
+        x_train, y_train = shared_dataset(train_set)
+        #x_train, y_train, x_valid, y_valid, x_test, y_test = trainTestSplit(feature, label)
 
+        inputIndex = [ u*length*batch_size for u in range(N+1)]
+        targetIndex = [ u*length*batch_size for u in range(N+1)]
+        seq = { 'inputs':inputIndex, 'targets':targetIndex }
         #-----------------------------------------
         # RNN SETUP
         #-----------------------------------------
         # initialize random generator
         rng = numpy.random.RandomState(1234)
         # construct the CTC_RNN class
-        classifier = RNN(rng=rng, output_taps=output_taps, n_in=n_in, n_hidden=n_hidden, n_out=n_out, samples=N, minibatch=minibatch, mode=mode, profile=profile)
+        classifier = RNN(rng=rng, output_taps=output_taps, n_in=n_in, n_hidden=n_hidden, n_out=n_out, mode=mode, profile=profile)
         # fetch the training function
-        train_fn = classifier.build_finetune_functions(learning_rate, mode, profile)
+        train_fn = classifier.build_finetune_functions(x_train, y_train, learning_rate, mode, profile)
 
         #-----------------------------------------
         # BENCHMARK START
         #-----------------------------------------
         # start the benchmark
-        print('Running', n_epochs)
         start_time = time.clock()
+        print('Running', n_epochs)
         for _ in range(n_epochs) :
-            train_fn(x_train, y_train)
-        print >> sys.stderr, ('     overall training epoch time (%.5fm)' % ((time.clock() - start_time) / 60.))
-
+            for j in range(0,N,batch_size) :
+                train_fn(seq['inputs'][j], seq['inputs'][j+batch_size], seq['targets'][j], seq['targets'][j+batch_size])
+        print >> sys.stderr, ('     training epoch time (%.5fm)' % ((time.clock()-start_time)/60.))
 #---------------------------------------------------------------------------------
 if __name__ == '__main__':
 
