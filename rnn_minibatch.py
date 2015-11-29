@@ -167,9 +167,10 @@ class RNN(object):
             gparams.append(gparam)
 
         # specify how to update the parameters of the model as a dictionary
-        updates = {}
-        for param, gparam in zip(self.params, gparams):
-            updates[param] = param - self.lr * gparam
+        updates = [
+        (param, param - learning_rate * gparam)
+        for param, gparam in zip(self.params, gparams)
+        ]
 
         # define the train function
         train_fn = theano.function([self.u, self.t],
