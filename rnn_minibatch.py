@@ -399,7 +399,8 @@ class Engine(object):
         print('Running', n_epochs)
         for _ in range(n_epochs) :
             for j in range(0,N,batch_size) :
-                train_fn(seq['inputs'][j], seq['inputs'][j+batch_size], seq['targets'][j], seq['targets'][j+batch_size])
+                cost = train_fn(seq['inputs'][j], seq['inputs'][j+batch_size], seq['targets'][j], seq['targets'][j+batch_size])
+                print("cost", cost)
         print >> sys.stderr, ('     training epoch time (%.5fm)' % ((time.clock()-start_time)/60.))
 #---------------------------------------------------------------------------------
 if __name__ == '__main__':
