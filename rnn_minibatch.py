@@ -344,7 +344,7 @@ class Engine(object):
         # BENCHMARK START
         #-----------------------------------------
         # start the benchmark
-        print('Running ({} epochs)'.format(n_epochs))
+        print('Running', n_epochs)
         start_time = time.clock()
         for _ in range(n_epochs) :
             train_fn(x_train, y_train)
@@ -353,4 +353,4 @@ class Engine(object):
 #---------------------------------------------------------------------------------
 if __name__ == '__main__':
 
-    Engine()
+    Engine(n_epochs=2)
