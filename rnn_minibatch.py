@@ -62,7 +62,7 @@ class RNN(object):
         # target (where first dimension is time)
         self.t = T.ivector()
         # initial hidden state of the RNN
-        self.H = T.imatrix()
+        self.H = T.dmatrix()
         # learning rate
         self.lr = T.scalar()
 
