@@ -287,7 +287,8 @@ class Engine(object):
             valid_set = (x_valid, y_valid)
             test_set = (x_test, y_test)
 
-            return train_set, valid_set, test_set
+            #return train_set, valid_set, test_set
+            return x_train, y_train, x_valid, y_valid, x_test, y_test
 
         def shared_dataset(data_xy, borrow=True):
             """ Function that loads the dataset into shared variables
@@ -324,11 +325,11 @@ class Engine(object):
         # data_y = numpy.random.uniform(size=(N*minibatch)).astype('int32')
 
         feature, label = preprocessData(dataset)
-        train_set, valid_set, test_set = trainTestSplit(feature, label)
-
-        x_test, y_test = shared_dataset(test_set)
-        x_valid, y_valid = shared_dataset(valid_set)
-        x_train, y_train = shared_dataset(train_set)
+        #train_set, valid_set, test_set = trainTestSplit(feature, label)
+        # x_test, y_test = shared_dataset(test_set)
+        # x_valid, y_valid = shared_dataset(valid_set)
+        # x_train, y_train = shared_dataset(train_set)
+        x_train, y_train, x_valid, y_valid, x_test, y_test = trainTestSplit(feature, label)
 
         #-----------------------------------------
         # RNN SETUP
