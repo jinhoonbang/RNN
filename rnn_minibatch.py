@@ -264,7 +264,7 @@ class Engine(object):
         N = 500  # number of samples
         n_in = 9460 # number of inumpyut units
         n_hidden = 1000# number of hidden units
-        n_out = 129 # number of output units
+        n_out = 3 #129 # number of output units
         n_symbol = 43
         length = 5 #sequence length
         batch_size = 500 # batch_size
@@ -303,6 +303,7 @@ class Engine(object):
             feature = feature[:,:col_index]
             label = label + 1
             label = label[:,0]
+            print(label)
 
             print("label", label.shape)
             print("feature", feature.shape)
@@ -405,4 +406,4 @@ class Engine(object):
 #---------------------------------------------------------------------------------
 if __name__ == '__main__':
 
-    Engine(n_epochs=20)
+    Engine(n_epochs=10)
