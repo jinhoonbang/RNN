@@ -79,11 +79,11 @@ class RNN(object):
         # length of output taps
         self.len_output_taps = len(output_taps)
         # input over the time (1st dim is the time)
-        self.x  = T.matrix('x')
+        self.x  = T.dmatrix('x')
         # target over the time (1st dim is the time)
         self.y  = T.ivector('y')
         # recurrent activations over the time (1st dim is the time)
-        self.H = T.matrix()
+        self.H = T.dmatrix()
         # learning rate
         self.lr = T.fscalar()
 
@@ -222,8 +222,8 @@ class RNN(object):
                 updates = updates,
                 givens={self.x:train_set_x[i_idx_0:i_idx_1],
                         self.y:train_set_y[t_idx_0:t_idx_1],
-                        self.H:T.cast(self.h,'float32'),
-                        self.lr:T.cast(learning_rate,'float32')},
+                        self.H:T.cast(self.h,'float64'),
+                        self.lr:T.cast(learning_rate,'float64')},
                 mode = mode,
                 profile = profile)
 
